@@ -1,0 +1,46 @@
+name: Pipeline ELT Quotidien
+
+# Le pipeline se lance manuellement, ou tous les jours à minuit
+on:
+  workflow_dispatch:
+#   schedule:
+#     - cron: 0 0 * * *   
+#   J'ai mis le cron en commentaire pour ne pas lancer le pipeline à minuit dans le cadre de l'examen.
+
+jobs:
+  run-elt:
+    runs-on: ubuntu-latest
+    
+    # Permissions requises pour utiliser Workload Identity Federation (OIDC) avec GitHub Actions
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Récupérer le code (Checkout)
+        uses: actions/checkout@v4
+
+      - name: Authentification Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/833312929773/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'github-actions-elt@lasalle-big-data.iam.gserviceaccount.com'
+
+      - name: Installation de Python et dlt
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          uv add "dlt[bigquery,gs]"         
+
+      # --- 🟢 ÉTAPE BRONZE : INGESTION ---
+      - name: 1. Ingestion API vers Bronze
+        run: python big_data/03_evaluation/mon_projet/ingestion/load_prodcuts.py
+
+      # --- ⚪ ÉTAPE SILVER : TRANSFORMATION ---
+      - name: 2. ransformation Bronze vers Silver
+        run: bq query --use_legacy_sql=false < big_data/03_evaluation/mon_projet/sql/bronze_to_silver.sql
+
+      # --- 🟡 ÉTAPE GOLD : AGRÉGATION ---
+      - name: 3. Agrégation Silver vers Gold
+        run: bq query --use_legacy_sql=false < big_data/03_evaluation/mon_projet/sql/silver_to_gold.sql
